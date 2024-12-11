@@ -67,7 +67,44 @@ var (
 	secondaryNode api.Node
 
 	testFrom, testTo int
+	mssStepSize      int
+	msgSizeShiftSize int
+
+	primaryNodeName   string
+	secondaryNodeName string
+
+	tolerations TolerationFlag
 )
+
+type TolerationFlag []api.Toleration
+
+func (tf *TolerationFlag) String() string {
+	var parts []string
+	for _, t := range *tf {
+		parts = append(parts, fmt.Sprintf("%s:%s:%s:%s", t.Key, t.Operator, t.Value, t.Effect))
+	}
+	return strings.Join(parts, ",")
+}
+
+func (tf *TolerationFlag) Set(value string) error {
+	tflags := strings.Split(value, ",")
+
+	for _, tflag := range tflags {
+		parts := strings.Split(tflag, ":")
+		if len(parts) != 4 {
+			return fmt.Errorf("invalid toleration format, expected 'key:operator:value:effect', got %q", tflag)
+		}
+
+		*tf = append(*tf, api.Toleration{
+			Key:      parts[0],
+			Operator: api.TolerationOperator(parts[1]),
+			Value:    parts[2],
+			Effect:   api.TaintEffect(parts[3]),
+		})
+	}
+
+	return nil
+}
 
 func init() {
 	flag.BoolVar(&hostnetworking, "hostnetworking", false,
@@ -84,6 +121,11 @@ func init() {
 		"(boolean) Run the cleanup resources phase only (use this flag to clean up orphaned resources from a test run)")
 	flag.IntVar(&testFrom, "testFrom", 0, "start from test number testFrom")
 	flag.IntVar(&testTo, "testTo", 5, "end at test number testTo")
+	flag.IntVar(&mssStepSize, "mssStepSize", 64, "MSS (iperf, netperf) step size")
+	flag.IntVar(&msgSizeShiftSize, "msgSizeShiftSize", 1, "MsgSize (qperf) left shift size")
+	flag.StringVar(&primaryNodeName, "primaryNode", "", "Primary node name")
+	flag.StringVar(&secondaryNodeName, "secondaryNode", "", "Secondary node name")
+	flag.Var(&tolerations, "tolerations", "Tolerations to apply to the pods")
 }
 
 func setupClient() *kubernetes.Clientset {
@@ -268,11 +310,14 @@ func createRCs(ctx context.Context, c *kubernetes.Clientset) bool {
 								"--mode=orchestrator",
 								fmt.Sprintf("--testFrom=%d", testFrom),
 								fmt.Sprintf("--testTo=%d", testTo),
+								fmt.Sprintf("--mssStepSize=%d", mssStepSize),
+								fmt.Sprintf("--msgSizeShiftSize=%d", msgSizeShiftSize),
 							},
 							ImagePullPolicy: "Always",
 						},
 					},
 					TerminationGracePeriodSeconds: new(int64),
+					Tolerations:                   tolerations,
 				},
 			},
 		},
@@ -328,6 +373,7 @@ func createRCs(ctx context.Context, c *kubernetes.Clientset) bool {
 							},
 						},
 						TerminationGracePeriodSeconds: new(int64),
+						Tolerations:                   tolerations,
 					},
 				},
 			},
@@ -470,8 +516,18 @@ func main() {
 		fmt.Println("Insufficient number of nodes for test (need minimum 2 nodes)")
 		return
 	}
+
 	primaryNode = nodes.Items[0]
 	secondaryNode = nodes.Items[1]
+	for _, node := range nodes.Items {
+		switch node.GetName() {
+		case primaryNodeName:
+			primaryNode = node
+		case secondaryNodeName:
+			secondaryNode = node
+		}
+	}
+
 	fmt.Printf("Selected primary,secondary nodes = (%s, %s)\n", primaryNode.GetName(), secondaryNode.GetName())
 	executeTests(ctx, c)
 	cleanup(ctx, c)

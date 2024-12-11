@@ -79,12 +79,16 @@ const (
 	outputCaptureFile    = "/tmp/output.txt"
 	mssMin               = 96
 	mssMax               = 1460
-	mssStepSize          = 64
 	msgSizeMax           = 1 << 16
 	msgSizeMin           = 1
 	parallelStreams      = "8"
 	rpcServicePort       = "5202"
 	localhostIPv4Address = "127.0.0.1"
+)
+
+var (
+	mssStepSize      int
+	msgSizeShiftSize int
 )
 
 const (
@@ -165,6 +169,8 @@ func init() {
 	flag.StringVar(&host, "host", "", "IP address to bind to (defaults to 0.0.0.0)")
 	flag.IntVar(&testFrom, "testFrom", 0, "start from test number testFrom")
 	flag.IntVar(&testTo, "testTo", 5, "end at test number testTo")
+	flag.IntVar(&mssStepSize, "mssStepSize", 64, "MSS (iperf, netperf) step size")
+	flag.IntVar(&msgSizeShiftSize, "msgSizeShiftSize", 1, "MsgSize (qperf) left shift size")
 
 	workerStateMap = make(map[string]*workerState)
 	testcases = []*testcase{
@@ -319,7 +325,7 @@ func allocateWorkToClient(workerState *workerState, workItem *WorkItem) {
 			return
 		case v.Type == qperfTCPTest:
 			workItem.ClientItem.MsgSize = v.MsgSize
-			v.MsgSize <<= 1
+			v.MsgSize <<= msgSizeShiftSize
 			if v.MsgSize > msgSizeMax {
 				v.Finished = true
 			}
